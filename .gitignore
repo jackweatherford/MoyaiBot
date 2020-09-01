@@ -1,2 +1,2 @@
-config.py
-__pycache__
+src/config.py
+src/__pycache__
