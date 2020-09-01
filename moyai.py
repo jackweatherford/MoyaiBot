@@ -6,7 +6,10 @@ import sys
 import subprocess
 import json
 import random
-from config import TOKEN
+
+TOKEN = os.getenv("DISCORD_TOKEN")
+if TOKEN == None:
+	from config import TOKEN
 
 client = discord.Client()
 
