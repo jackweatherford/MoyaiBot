@@ -6,6 +6,7 @@ import sys
 import subprocess
 import json
 import random
+from config import TOKEN
 
 client = discord.Client()
 
@@ -84,4 +85,4 @@ async def on_member_join(member):
 	await member.edit(nick='🗿')
 	await saveScores()
 
-client.run('NzUwMTY1NjE4MjIwNTk3MzUw.X02kLA._DyR7slb6KsrM-ktlfraWZw7lno')
+client.run(TOKEN)
