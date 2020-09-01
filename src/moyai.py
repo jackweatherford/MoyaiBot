@@ -10,8 +10,14 @@ import re
 import discord
 
 TOKEN = os.getenv('DISCORD_TOKEN')
+scores_path = 'src/res/scores.json'
+stats_path = 'src/res/stats.json'
+moyai_png_path = 'src/res/moyai.png'
 if TOKEN == None:
 	from config import TOKEN
+	scores_path = 'res/scores.json'
+	stats_path = 'res/stats.json'
+	moyai_png_path = 'res/moyai.png'
 
 client = discord.Client()
 
@@ -26,12 +32,12 @@ def isPlural(num):
 
 async def saveScores():
 	global scores
-	with open('res/scores.json', 'w') as file:
+	with open(scores_path, 'w') as file:
 		json.dump(scores, file)
 
 async def saveStats():
 	global stats
-	with open('res/stats.json', 'w') as file:
+	with open(stats_path, 'w') as file:
 		json.dump(stats, file)
 
 async def help(author):
@@ -98,7 +104,7 @@ async def on_message(message):
 	
 	if '🗿' in message.content:
 		if random.randint(1,100) == 100:
-			await message.channel.send(f'A RARE GOLDEN 🗿 APPEARED!!!\n{name} JUST EARNED 100 🗿 POINTS!', file=discord.File('res/moyai.png'))
+			await message.channel.send(f'A RARE GOLDEN 🗿 APPEARED!!!\n{name.upper()} JUST EARNED 100 🗿 POINTS!', file=discord.File(moyai_png_path))
 			scores[author] = score + 100
 		else:
 			scores[author] = score + 1
@@ -184,9 +190,9 @@ async def on_member_join(member):
 @client.event
 async def on_ready():
 	global scores, stats
-	with open('res/scores.json') as file:
+	with open(scores_path) as file:
 		scores = json.load(file)
-	with open('res/stats.json') as file:
+	with open(stats_path) as file:
 		stats = json.load(file)
 	print('Ready!')
 
