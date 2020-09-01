@@ -5,88 +5,189 @@ import sys
 import subprocess
 import json
 import random
+import re
 
 import discord
 
-TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN = os.getenv('DISCORD_TOKEN')
 if TOKEN == None:
 	from config import TOKEN
 
 client = discord.Client()
 
 scores = {}
+stats = {}
 
-@client.event
-async def on_ready():
-	global scores, wait
-	with open("scores.json") as file:
-		scores = json.load(file)
-	print('Ready!')
+def isPlural(num):
+	if num == 1:
+		return ''
+	else:
+		return 's'
 
 async def saveScores():
 	global scores
-	with open("scores.json", "w") as file:
+	with open('res/scores.json', 'w') as file:
 		json.dump(scores, file)
+
+async def saveStats():
+	global stats
+	with open('res/stats.json', 'w') as file:
+		json.dump(stats, file)
+
+async def help(author):
+	await author.create_dm()
+	await author.dm_channel.send(content='```🗿 Help 🗿\n' +
+		'\tMessages without 🗿 in them will be deleted.\n' +
+		'\tMessages with a 🗿 in them will always award the sender exactly 1 point, regardless of how many 🗿 are in a single message.\n' +
+		'\tFor each message, there is a 1 in 100 chance to spawn the golden 🗿, which will award you 100 points!\n\n' +
+		'🗿 Commands 🗿\n' +
+		'Enter any of the following words in the 🗿 server to get a response:\n' +
+		'\thelp: The bot will dm you this message.\n' +
+		'\tscore OR points: The bot will display your 🗿 points.\n' +
+		'\ttop OR leaderboard: The bot will display a leaderboard of the users with the top 10 highest 🗿 points.\n' +
+		'\tbet <points> OR gamble <points>: Bet the amount of <points> specified on a coin flip, 1:1 payout.\n' +
+		'\tstats: Displays your gambling statistics.```')
+
+async def top(channel):
+	global scores
+	leaderboard = ''
+	i = 1
+	scores_sort = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+	for user, points in scores_sort:
+		leaderboard += f'{i}. {user}: {points} 🗿 point{isPlural(points)}.\n'
+		i += 1
+		if i == 11:
+			break
+	await channel.send(content=f'```🗿 Leaderboard 🗿\n{leaderboard}```')
+
+async def displayStats(channel, author):
+	global stats
+	
+	author_stats = stats[author]
+	
+	profit = author_stats["profit"]
+	sign = ''
+	if profit > 0:
+		sign = '+'
+	
+	num_bets = author_stats["num_bets"]
+	winrate = 0
+	if num_bets != 0:
+		winrate = author_stats["num_wins"] / num_bets * 100
+	
+	statistics = f'Total points bet for: {author_stats["total_points_bet"]}\n' + \
+		f'Number of bets: {num_bets}\n' + \
+		f'Winrate: {winrate:.2f}%\n' + \
+		f'Profit: {sign}{profit}\n' + \
+		f'Biggest win: +{author_stats["biggest_win"]}\n' + \
+		f'Biggest loss: -{author_stats["biggest_loss"]}'
+	
+	await channel.send(content=f'```🗿 {author}\'s Gambling Statistics 🗿\n{statistics}```')
 
 @client.event
 async def on_message(message):
-	global scores
+	global scores, stats
+	name = message.author.name
+	author = message.author.name + '#' + message.author.discriminator
 	# if the author of the message is this bot then do nothing
-	if message.author == client.user:
+	if author == str(client.user):
 		return
+	score = scores[author]
+	author_stats = stats[author]
+	channel = message.channel
 	
 	if '🗿' in message.content:
 		if random.randint(1,100) == 100:
-			await message.channel.send(f"A RARE GOLDEN 🗿 APPEARED!!!\n{message.author.name} JUST EARNED 100 🗿", file=discord.File('moyai.png'))
-			scores[message.author.name] = scores[message.author.name] + 100
-			await saveScores()
-			return
-		scores[message.author.name] = scores[message.author.name] + 1
+			await message.channel.send(f'A RARE GOLDEN 🗿 APPEARED!!!\n{name} JUST EARNED 100 🗿 POINTS!', file=discord.File('res/moyai.png'))
+			scores[author] = score + 100
+		else:
+			scores[author] = score + 1
 		await saveScores()
-		return
+	else:
+		await message.delete()
 	
-	await message.delete()
+	content = message.content.lower()
 	
-	if message.content.lower() == 'top':
-		leaderboard = ''
-		i = 1
-		scores_sort = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-		for name, score in scores_sort:
-			leaderboard += f'{i}. {name}: {score}\n'
-			i += 1
-			if i == 11:
-				break
-		await message.channel.send(content=f'```{"🗿 Leaderboard 🗿"}\n{leaderboard}```')
+	if content == 'help':
+		await help(message.author)
 	
-	if message.content.lower() == 'score':
-		await message.channel.send(f'{message.author.name} has {scores[message.author.name]} 🗿')
+	elif content == 'points' or content == 'score':
+		await channel.send(f'```{name} has {score} 🗿 point{isPlural(score)}.```')
 	
-	if message.content.lower() == 'help':
-		await message.author.create_dm()
-		await message.author.dm_channel.send(content=f'```{"🗿 Commands 🗿"}\n{"Enter any of the following words in the 🗿 server to get a response:"}\n\n{"help: The bot will dm you this message"}\n{"score: The bot will post your 🗿 count"}\n{"top: The bot will post a leaderboard of the users with the highest 🗿 counts"}```')
+	elif content == 'top' or content == 'leaderboard':
+		await top(channel)
+	
+	elif content == 'stats':
+		await displayStats(channel, author)
+	
+	elif re.search('^bet ', content) or re.search('^gamble ', content):
+		digit_start = 4
+		if re.search('^gamble ', content):
+			digit_start = 7
+		
+		if content[digit_start:].isdigit():
+			points = int(content[digit_start:])
+			if points == 0:
+				await channel.send('```ERROR: You can\'t bet 0 points!```')
+				return
+			
+			if points > score:
+				await channel.send(f'```You currently have {score} 🗿 point{isPlural(score)}, you cannot bet {points} 🗿 point{isPlural(points)}.```')
+				return
+			
+			author_stats['total_points_bet'] += points
+			author_stats['num_bets'] += 1
+			
+			if random.randint(1,100) >= 50:
+				scores[author] = score + points
+				author_stats['num_wins'] += 1
+				author_stats['profit'] += points
+				if points > author_stats['biggest_win']:
+					author_stats['biggest_win'] = points
+				await channel.send(f'```{name} won {points} 🗿 point{isPlural(points)} and now has {scores[author]} 🗿 point{isPlural(scores[author])}.```')
+			
+			else:
+				scores[author] = score - points
+				author_stats['profit'] -= points
+				if points > author_stats['biggest_loss']:
+					author_stats['biggest_loss'] = points
+				await channel.send(f'```{name} lost {points} 🗿 point{isPlural(points)} and now has {scores[author]} 🗿 point{isPlural(scores[author])}.```')
+			
+			await saveScores()
+			await saveStats()
+		
+		else:
+			await channel.send(f'```ERROR: Your bet must be a positive integer. ex: bet 10 OR gamble 10```')
 
 @client.event
 async def on_message_edit(before, after):
 	global scores
+	# if the author of the message is this bot then do nothing
+	if before.author == client.user:
+		return
 	
-	if not '🗿' in after.content :
-		scores[before.author.name] = scores[before.author.name] - 1
-		await saveScores()
+	if not '🗿' in after.content:
 		await after.delete()
 
 @client.event
-async def on_message_delete(message):
-	global scores
-	
-	if '🗿' in message.content:
-		scores[message.author.name] = scores[message.author.name] - 1
-		await saveScores()
+async def on_member_join(member):
+	global scores, stats
+	scores[str(member)] = 0
+	await saveScores()
+	new_stats = {}
+	for key in ['total_points_bet', 'num_bets', 'num_wins', 'profit', 'biggest_win', 'biggest_loss']:
+		new_stats[key] = 0
+	stats[str(member)] = new_stats
+	await saveStats()
+	await member.edit(nick='🗿')
 
 @client.event
-async def on_member_join(member):
-	global scores
-	scores[member.name] = 0
-	await member.edit(nick='🗿')
-	await saveScores()
+async def on_ready():
+	global scores, stats
+	with open('res/scores.json') as file:
+		scores = json.load(file)
+	with open('res/stats.json') as file:
+		stats = json.load(file)
+	print('Ready!')
 
 client.run(TOKEN)
