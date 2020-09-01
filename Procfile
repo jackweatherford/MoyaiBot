@@ -1,1 +1,1 @@
-worker: python moyai.py
+worker: python src/moyai.py
