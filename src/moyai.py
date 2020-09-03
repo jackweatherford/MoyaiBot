@@ -17,11 +17,11 @@ TOKEN = getenv('DISCORD_TOKEN')
 AWS_ACCESS_KEY_ID = getenv('AWS_ACCESS_KEY_ID')
 AWS_SECRET_KEY = getenv('AWS_SECRET_KEY')
 # AWS S3 Stats JSON
-STATS_URL = getenv('STATS_URL')
+S3_URL = getenv('S3_URL')
 
 # If environment variables aren't set, grab from config.py + update filepaths
 if TOKEN == None:
-	from config import TOKEN, AWS_ACCESS_KEY_ID, AWS_SECRET_KEY, STATS_URL
+	from config import TOKEN, AWS_ACCESS_KEY_ID, AWS_SECRET_KEY, S3_URL
 	stats_path = 'res/stats.json'
 	moyai_png_path = 'res/moyai.png'
 
@@ -39,25 +39,33 @@ def isPlural(num): # Return 's' if num is plural
 	else:
 		return 's'
 
-async def saveStats(stats): # Save stats
+def saveStats(stats): # Save stats
 	with open(stats_path, 'w') as file:
 		dump(stats, file)
 	# Send stats.json to S3
 	s3_client.upload_file(stats_path, 'jackweatherford-bucket', 'stats.json', ExtraArgs={'GrantRead': 'uri="http://acs.amazonaws.com/groups/global/AllUsers"'})
 
-async def help(author): # Send a help message to author
+async def initMember(member):
+	global stats
+	for key in ['points', 'total_points_bet', 'num_bets', 'num_wins', 'profit', 'biggest_win', 'biggest_loss']:
+		stats[member][key] = 0
+	saveStats(stats)
+
+async def help(message): # Send a help message to author
+	author = message.author
+	await message.channel.send(f'```Sent {author.name} a 🗿 help message.```')
 	await author.create_dm()
-	await author.dm_channel.send(content='```🗿 Help 🗿\n' +
-		'\tMessages without 🗿 in them will be deleted.\n' +
+	await author.dm_channel.send(content='```🗿 Moyai Bot 🗿\n' +
+		'\t🗿 MOYAI BOT 🗿 is a simple Discord economy bot that uses the 🗿 emoji as its currency. Features include gambling, stats, leaderboards, and more.\n' +
 		'\tMessages with a 🗿 in them will always award the sender exactly 1 point, regardless of how many 🗿 are in a single message.\n' +
-		'\tFor each message, there is a 1 in 100 chance to spawn the golden 🗿, which will award you 100 points!\n\n' +
+		'\tFor each message sent that has a 🗿, there is a 1 in 100 chance to spawn the GOLDEN 🗿, which will award the sender 100 points!\n\n' +
 		'🗿 Commands 🗿\n' +
-		'Enter any of the following words in the 🗿 server to get a response:\n' +
-		'\thelp: The bot will dm you this message.\n' +
-		'\tscore OR points: The bot will display your 🗿 points.\n' +
-		'\ttop OR leaderboard: The bot will display a leaderboard of the users with the top 10 highest 🗿 points.\n' +
-		'\tbet <points> OR gamble <points>: Bet the amount of <points> specified on a coin flip, 1:1 payout.\n' +
-		'\tstats: Displays your gambling statistics.```')
+		'Enter any of the following commands in any of the server\'s channels to get a response:\n' +
+		'\tm help: The bot will dm you this message.\n' +
+		'\tm score OR m points: Displays your 🗿 points.\n' +
+		'\tm top OR m leaderboard: Displays a leaderboard of the users with the top 10 highest 🗿 points.\n' +
+		'\tm bet <points> OR m gamble <points>: Bet the amount of <points> specified on a coin flip, 1:1 payout.\n' +
+		'\tm stats: Displays your gambling statistics.```')
 
 async def top(channel, stats): # Show top points
 	leaderboard = ''
@@ -89,7 +97,7 @@ async def displayStats(channel, author, author_stats): # Show author's stats
 		f'Biggest win: +{author_stats["biggest_win"]}\n' + \
 		f'Biggest loss: -{author_stats["biggest_loss"]}'
 	
-	await channel.send(content=f'```🗿 {author}\'s Gambling Statistics 🗿\n{statistics}```')
+	await channel.send(content=f'```🗿 {author[:-5]}\'s Gambling Statistics 🗿\n{statistics}```')
 
 @discord_client.event
 async def on_message(message): # When a message is sent
@@ -99,7 +107,12 @@ async def on_message(message): # When a message is sent
 	# if the author of the message is this bot then do nothing
 	if author == str(discord_client.user):
 		return
-	author_stats = stats[author]
+	try:
+		author_stats = stats[author]
+	except KeyError:
+		await initMember(author, stats)
+		author_stats = stats[author]
+	
 	points = author_stats['points']
 	channel = message.channel
 	
@@ -109,32 +122,36 @@ async def on_message(message): # When a message is sent
 			author_stats['points'] = points + 100
 		else:
 			author_stats['points'] = points + 1
-		await saveStats(stats)
+		saveStats(stats)
 		return
 	
-	await message.delete() # If message has no moyai
+	# await message.delete() # For complete chaos, if message has no moyai
 	
 	content = message.content.lower()
 	
-	if content == 'help':
-		await help(message.author)
+	if content == 'm help':
+		await help(message)
 	
-	elif content == 'score' or content == 'points':
+	elif content == 'm score' or content == 'm points':
 		await channel.send(f'```{name} has {points} 🗿 point{isPlural(points)}.```')
 	
-	elif content == 'top' or content == 'leaderboard':
+	elif content == 'm top' or content == 'm leaderboard':
 		await top(channel, stats)
 	
-	elif content == 'stats':
+	elif content == 'm stats':
 		await displayStats(channel, author, author_stats)
 	
-	elif search('^bet ', content) or search('^gamble ', content):
-		digit_start = 4 # If command was 'bet '
-		if search('^gamble ', content):
-			digit_start = 7 # If command was 'gamble '
+	elif search('^m bet ', content) or search('^m gamble ', content):
+		digit_start = 6 # If command was 'bet '
+		if search('^m gamble ', content):
+			digit_start = 9 # If command was 'gamble '
 		
-		if content[digit_start:].isdigit():
-			bet = int(content[digit_start:])
+		bet_str = content[digit_start:]
+		if bet_str.isdigit() or bet_str == 'all':
+			if bet_str == 'all':
+				bet = points
+			else:
+				bet = int(bet_str)
 			if bet == 0:
 				await channel.send('```ERROR: You can\'t bet 0 points!```')
 				return
@@ -161,11 +178,13 @@ async def on_message(message): # When a message is sent
 					author_stats['biggest_loss'] = bet
 				await channel.send(f'```{name} lost {bet} 🗿 point{isPlural(bet)} and now has {points - bet} 🗿 point{isPlural(points - bet)}.```')
 			
-			await saveStats(stats)
+			saveStats(stats)
 		
 		else: # If bet isn't an integer
-			await channel.send(f'```ERROR: Your bet must be a positive integer. ex: bet 10 OR gamble 10```')
+			await channel.send(f'```ERROR: Your bet must be a positive integer. ex: m bet 10 OR m gamble 10```')
 
+'''
+# For complete chaos
 @discord_client.event
 async def on_message_edit(before, after): # When a message is edited
 	# if the author of the message is this bot then do nothing
@@ -174,23 +193,22 @@ async def on_message_edit(before, after): # When a message is edited
 	
 	if not '🗿' in after.content:
 		await after.delete()
+'''
 
 @discord_client.event
 async def on_member_join(member): # When a new member joins
 	global stats
 	# Initialize member stats
 	member_str = str(member)
-	for key in ['points', 'total_points_bet', 'num_bets', 'num_wins', 'profit', 'biggest_win', 'biggest_loss']:
-		stats[member_str][key] = 0
-	await member.edit(nick='🗿')
-	await saveStats(stats)
+	await initMember(member_str)
+	# await member.edit(nick='🗿') # For complete chaos
 
 @discord_client.event
 async def on_ready(): # When the bot is ready
 	global stats
 	
 	# Load stats from S3
-	stats = load(request.urlopen(STATS_URL))
+	stats = load(request.urlopen(S3_URL + 'stats.json'))
 	
 	print('Ready!')
 
