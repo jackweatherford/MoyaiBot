@@ -1,5 +1,5 @@
 from os import getenv
-from random import randint
+from random import randint, seed
 from re import search
 
 from json import dump, load
@@ -8,7 +8,6 @@ from urllib import request
 from discord import Client, File
 from boto3 import client
 
-stats_path = 'src/res/stats.json'
 moyai_png_path = 'src/res/moyai.png'
 
 # Discord Token
@@ -16,13 +15,13 @@ TOKEN = getenv('DISCORD_TOKEN')
 # AWS Access Keys
 AWS_ACCESS_KEY_ID = getenv('AWS_ACCESS_KEY_ID')
 AWS_SECRET_KEY = getenv('AWS_SECRET_KEY')
-# AWS S3 Stats JSON
+# S3 Info
 S3_URL = getenv('S3_URL')
+BUCKET_NAME = getenv('BUCKET_NAME')
 
 # If environment variables aren't set, grab from config.py + update filepaths
 if TOKEN == None:
-	from config import TOKEN, AWS_ACCESS_KEY_ID, AWS_SECRET_KEY, S3_URL
-	stats_path = 'res/stats.json'
+	from config import TOKEN, AWS_ACCESS_KEY_ID, AWS_SECRET_KEY, S3_URL, BUCKET_NAME
 	moyai_png_path = 'res/moyai.png'
 
 # Discord Client
@@ -39,24 +38,27 @@ def isPlural(num): # Return 's' if num is plural
 	else:
 		return 's'
 
-def saveStats(stats): # Save stats
-	with open(stats_path, 'w') as file:
+def loadStats(guild_id):
+	# Load stats from S3
+	return load(request.urlopen(S3_URL + guild_id + '/stats.json'))
+
+def saveStats(stats, guild_id): # Save stats
+	with open('stats.json', 'w') as file:
 		dump(stats, file)
 	# Send stats.json to S3
-	s3_client.upload_file(stats_path, 'jackweatherford-bucket', 'stats.json', ExtraArgs={'GrantRead': 'uri="http://acs.amazonaws.com/groups/global/AllUsers"'})
+	s3_client.upload_file('stats.json', BUCKET_NAME, 'MoyaiBot/servers/' + guild_id + '/stats.json', ExtraArgs={'GrantRead': 'uri="http://acs.amazonaws.com/groups/global/AllUsers"'})
 
-async def initMember(member):
-	global stats
+def initMember(stats, id):
+	stats[id] = {}
 	for key in ['points', 'total_points_bet', 'num_bets', 'num_wins', 'profit', 'biggest_win', 'biggest_loss']:
-		stats[member][key] = 0
-	saveStats(stats)
+		stats[id][key] = 0
+	return stats
 
-async def help(message): # Send a help message to author
-	author = message.author
-	await message.channel.send(f'```Sent {author.name} a 🗿 help message.```')
+async def help(author, channel): # Send a help message to author
+	await channel.send(f'```Sent {author.name} a 🗿 help message.```')
 	await author.create_dm()
 	await author.dm_channel.send(content='```🗿 Moyai Bot 🗿\n' +
-		'\t🗿 MOYAI BOT 🗿 is a simple Discord economy bot that uses the 🗿 emoji as its currency. Features include gambling, stats, leaderboards, and more.\n' +
+		'\t🗿 MOYAI BOT 🗿 is a simple Discord economy bot that uses the 🗿 emoji as its currency. Features include gambling, stats, leaderboards, + more\n' +
 		'\tMessages with a 🗿 in them will always award the sender exactly 1 point, regardless of how many 🗿 are in a single message.\n' +
 		'\tFor each message sent that has a 🗿, there is a 1 in 100 chance to spawn the GOLDEN 🗿, which will award the sender 100 points!\n\n' +
 		'🗿 Commands 🗿\n' +
@@ -71,15 +73,16 @@ async def top(channel, stats): # Show top points
 	leaderboard = ''
 	i = 1
 	stats_sort = sorted(stats.items(), key=lambda x: x[1]['points'], reverse=True)
-	for user, user_stats in stats_sort:
+	for user_id, user_stats in stats_sort:
 		points = user_stats['points']
-		leaderboard += f'{i}. {user}: {points} 🗿 point{isPlural(points)}.\n'
+		user_name = await discord_client.fetch_user(user_id)
+		leaderboard += f'{i}. {user_name}: {points} 🗿 point{isPlural(points)}.\n'
 		i += 1
 		if i == 11:
 			break
 	await channel.send(content=f'```🗿 Leaderboard 🗿\n{leaderboard}```')
 
-async def displayStats(channel, author, author_stats): # Show author's stats
+async def displayStats(channel, author_name, author_stats): # Show author's stats
 	profit = author_stats["profit"]
 	sign = ''
 	if profit > 0:
@@ -97,32 +100,37 @@ async def displayStats(channel, author, author_stats): # Show author's stats
 		f'Biggest win: +{author_stats["biggest_win"]}\n' + \
 		f'Biggest loss: -{author_stats["biggest_loss"]}'
 	
-	await channel.send(content=f'```🗿 {author[:-5]}\'s Gambling Statistics 🗿\n{statistics}```')
+	await channel.send(content=f'```🗿 {author_name}\'s Gambling Statistics 🗿\n{statistics}```')
 
 @discord_client.event
 async def on_message(message): # When a message is sent
-	global stats
-	name = message.author.name
-	author = message.author.name + '#' + message.author.discriminator
 	# if the author of the message is this bot then do nothing
-	if author == str(discord_client.user):
+	if message.author == discord_client.user:
 		return
+	
+	guild_id = str(message.guild.id)
+	stats = loadStats(guild_id)
+	
+	author_name = message.author.name
+	author_id = str(message.author.id)
+	
 	try:
-		author_stats = stats[author]
+		author_stats = stats[author_id]
 	except KeyError:
-		await initMember(author, stats)
-		author_stats = stats[author]
+		stats = initMember(stats, author_id)
+		saveStats(stats, guild_id)
+		author_stats = stats[author_id]
 	
 	points = author_stats['points']
 	channel = message.channel
 	
 	if '🗿' in message.content:
 		if randint(1,100) == 100: # Golden moyai
-			await message.channel.send(f'A RARE GOLDEN 🗿 APPEARED!!!\n{name.upper()} JUST EARNED 100 🗿 POINTS!', file=File(moyai_png_path))
+			await channel.send(f'A RARE GOLDEN 🗿 APPEARED!!!\n{author_name.upper()} JUST EARNED 100 🗿 POINTS!', file=File(moyai_png_path))
 			author_stats['points'] = points + 100
 		else:
 			author_stats['points'] = points + 1
-		saveStats(stats)
+		saveStats(stats, guild_id)
 		return
 	
 	# await message.delete() # For complete chaos, if message has no moyai
@@ -130,16 +138,16 @@ async def on_message(message): # When a message is sent
 	content = message.content.lower()
 	
 	if content == 'm help':
-		await help(message)
+		await help(message.author, channel)
 	
 	elif content == 'm score' or content == 'm points':
-		await channel.send(f'```{name} has {points} 🗿 point{isPlural(points)}.```')
+		await channel.send(f'```{author_name} has {points} 🗿 point{isPlural(points)}.```')
 	
 	elif content == 'm top' or content == 'm leaderboard':
 		await top(channel, stats)
 	
 	elif content == 'm stats':
-		await displayStats(channel, author, author_stats)
+		await displayStats(channel, author_name, author_stats)
 	
 	elif search('^m bet ', content) or search('^m gamble ', content):
 		digit_start = 6 # If command was 'bet '
@@ -164,21 +172,23 @@ async def on_message(message): # When a message is sent
 			author_stats['num_bets'] += 1
 			
 			if randint(1,100) >= 50: # If win
-				author_stats['points'] = points + bet
+				res = points + bet
+				author_stats['points'] = res
 				author_stats['num_wins'] += 1
 				author_stats['profit'] += bet
 				if bet > author_stats['biggest_win']:
 					author_stats['biggest_win'] = bet
-				await channel.send(f'```{name} won {bet} 🗿 point{isPlural(bet)} and now has {points + bet} 🗿 point{isPlural(points + bet)}.```')
+				await channel.send(f'```{author_name} won {bet} 🗿 point{isPlural(bet)} and now has {res} 🗿 point{isPlural(res)}.```')
 			
 			else: # If lose
-				author_stats['points'] = points - bet
+				res = points - bet
+				author_stats['points'] = res
 				author_stats['profit'] -= bet
 				if bet > author_stats['biggest_loss']:
 					author_stats['biggest_loss'] = bet
-				await channel.send(f'```{name} lost {bet} 🗿 point{isPlural(bet)} and now has {points - bet} 🗿 point{isPlural(points - bet)}.```')
+				await channel.send(f'```{author_name} lost {bet} 🗿 point{isPlural(bet)} and now has {res} 🗿 point{isPlural(res)}.```')
 			
-			saveStats(stats)
+			saveStats(stats, guild_id)
 		
 		else: # If bet isn't an integer
 			await channel.send(f'```ERROR: Your bet must be a positive integer. ex: m bet 10 OR m gamble 10```')
@@ -197,19 +207,27 @@ async def on_message_edit(before, after): # When a message is edited
 
 @discord_client.event
 async def on_member_join(member): # When a new member joins
-	global stats
+	if member == discord_client.user:
+		return
+	guild_id = str(member.guild.id)
+	stats = loadStats(guild_id)
 	# Initialize member stats
-	member_str = str(member)
-	await initMember(member_str)
+	stats = initMember(stats, str(member.id))
+	saveStats(stats, guild_id)
 	# await member.edit(nick='🗿') # For complete chaos
 
 @discord_client.event
+async def on_guild_join(guild):
+	stats = {}
+	for member in guild.members:
+		if member.id == discord_client.user.id:
+			continue
+		stats = initMember(stats, str(member.id))
+	saveStats(stats, str(guild.id))
+
+@discord_client.event
 async def on_ready(): # When the bot is ready
-	global stats
-	
-	# Load stats from S3
-	stats = load(request.urlopen(S3_URL + 'stats.json'))
-	
+	seed()
 	print('Ready!')
 
 print('Connecting...')
