@@ -220,7 +220,7 @@ async def on_member_join(member): # When a new member joins
 async def on_guild_join(guild):
 	stats = {}
 	for member in guild.members:
-		if member.id == discord_client.user.id:
+		if member.bot:
 			continue
 		stats = initMember(stats, str(member.id))
 	saveStats(stats, str(guild.id))
