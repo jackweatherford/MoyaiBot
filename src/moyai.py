@@ -104,8 +104,8 @@ async def displayStats(channel, author_name, author_stats): # Show author's stat
 
 @discord_client.event
 async def on_message(message): # When a message is sent
-	# if the author of the message is this bot then do nothing
-	if message.author == discord_client.user:
+	# if the author of the message is a bot then do nothing
+	if message.author.bot:
 		return
 	
 	guild_id = str(message.guild.id)
@@ -133,7 +133,7 @@ async def on_message(message): # When a message is sent
 		saveStats(stats, guild_id)
 		return
 	
-	# await message.delete() # For complete chaos, if message has no moyai
+	# await message.delete() # For complete chaos, delete if message has no moyai
 	
 	content = message.content.lower()
 	
@@ -207,7 +207,7 @@ async def on_message_edit(before, after): # When a message is edited
 
 @discord_client.event
 async def on_member_join(member): # When a new member joins
-	if member == discord_client.user:
+	if member.bot:
 		return
 	guild_id = str(member.guild.id)
 	stats = loadStats(guild_id)
@@ -227,7 +227,7 @@ async def on_guild_join(guild):
 
 @discord_client.event
 async def on_ready(): # When the bot is ready
-	seed()
+	seed() # Re-seed RNG
 	print('Ready!')
 
 print('Connecting...')
